@@ -1,0 +1,9 @@
+# IntelliJ
+.idea/
+*.iml
+
+# Maven
+target/
+
+# Swagger UI
+swagger-ui/
