@@ -27,7 +27,14 @@ import ch.webmate.api.doclet.reporter.model.Application;
 import ch.webmate.api.doclet.reporter.util.OptionsStore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.wordnik.swagger.models.Swagger;
+import com.wordnik.swagger.models.auth.SecuritySchemeDefinition;
+import com.wordnik.swagger.models.parameters.Parameter;
+import com.wordnik.swagger.util.SecurityDefinitionDeserializer;
+import org.dozer.DozerBeanMapper;
+import org.dozer.loader.api.BeanMappingBuilder;
+import org.dozer.loader.api.TypeMappingOptions;
 
 import java.io.File;
 import java.io.IOException;
@@ -39,6 +46,8 @@ import java.util.Map;
  */
 public class Swagger2Reporter implements ApiReporter {
 
+    public static final String OPTION_BASE_FILE = "--swagger2BaseFile";
+
     protected OptionsStore optionsStore = createOptionsStore();
 
     @Override
@@ -46,10 +55,38 @@ public class Swagger2Reporter implements ApiReporter {
 
         ObjectMapper objectMapper = createObjectMapper();
 
+        String baseFile = optionsStore.getSingleOption(OPTION_BASE_FILE);
+
+        Swagger baseSwagger = null;
+
+        System.out.println("BaseFile: " + baseFile);
+
+        if(baseFile != null) {
+
+            System.out.println(new File(baseFile).getAbsolutePath());
+
+            try {
+                baseSwagger = objectMapper.readValue(new File(baseFile), Swagger.class);
+            } catch (IOException e) {
+                e.printStackTrace();
+                throw new IllegalStateException("Failed to read base swagger.json");
+            }
+        }
+
         // TODO: support reading existing swagger.json by reading it
         // using jackson and dozer pojo merge
 
         Swagger swagger = Swagger2ModelFactory.INSTANCE.createSwaggerTreeFromApplication(application);
+
+        if(baseSwagger != null) {
+
+            DozerBeanMapper mapper = createBeanMapper();
+
+            mapper.map(swagger, baseSwagger);
+
+            swagger = baseSwagger;
+
+        }
 
         try {
             objectMapper.writer().writeValue(System.out, swagger);
@@ -63,9 +100,27 @@ public class Swagger2Reporter implements ApiReporter {
 
     }
 
+    private DozerBeanMapper createBeanMapper() {
+
+        DozerBeanMapper beanMapper = new DozerBeanMapper();
+
+        beanMapper.addMapping(new BeanMappingBuilder() {
+            @Override
+            protected void configure() {
+                mapping(Swagger.class, Swagger.class, TypeMappingOptions.oneWay(), TypeMappingOptions.mapNull(false));
+                mapping(Parameter.class, Parameter.class, TypeMappingOptions.beanFactory("ch.webmate.api.doclet.reporter.swagger2.ParameterBeanFactory"));
+            }
+        });
+
+        return beanMapper;
+
+    }
+
     protected OptionsStore createOptionsStore() {
 
         OptionsStore optionsStore = new OptionsStore();
+
+        optionsStore.registerKnownOption(OPTION_BASE_FILE, 2);
 
         return optionsStore;
 
@@ -77,8 +132,14 @@ public class Swagger2Reporter implements ApiReporter {
 
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
-        return objectMapper;
+        SimpleModule module = new SimpleModule();
 
+        module.addDeserializer(SecuritySchemeDefinition.class, new SecurityDefinitionDeserializer());
+
+        objectMapper.registerModule(module);
+
+        return objectMapper;
+        
     }
 
     @Override
